@@ -5,14 +5,22 @@ use rand::rngs::StdRng;
 use rand_distr::{Distribution, Triangular};
 use tokio::{task::JoinSet, time::sleep};
 
-pub fn spawn_senders(channel_rx: Receiver<String>, count: usize, mean: u64) -> JoinSet<()> {
+use crate::metrics::MetricsHandle;
+
+pub fn spawn_senders(
+    channel_rx: Receiver<String>,
+    metrics: &MetricsHandle,
+    count: usize,
+    mean: u64,
+) -> JoinSet<()> {
     let mut set = JoinSet::new();
 
     for id in 0..count {
         let recv = channel_rx.clone();
+        let handle = metrics.clone();
 
         set.spawn(async move {
-            let mut sender = Sender::new(id, recv, mean);
+            let mut sender = Sender::new(id, recv, handle, mean);
             sender.send_messages().await;
         });
     }
@@ -23,12 +31,19 @@ pub fn spawn_senders(channel_rx: Receiver<String>, count: usize, mean: u64) -> J
 struct Sender {
     id: usize,
     channel_rx: Receiver<String>,
+    metrics: MetricsHandle,
     rng: StdRng,
     send_distr: Triangular<f64>,
 }
 
 impl Sender {
-    fn new(id: usize, channel_rx: Receiver<String>, mean_send_time: u64) -> Self {
+    #[must_use]
+    fn new(
+        id: usize,
+        channel_rx: Receiver<String>,
+        metrics: MetricsHandle,
+        mean_send_time: u64,
+    ) -> Self {
         let rng = rand::make_rng();
 
         let min = (mean_send_time / 2) as f64;
@@ -40,6 +55,7 @@ impl Sender {
         Self {
             id,
             channel_rx,
+            metrics,
             rng,
             send_distr,
         }
@@ -58,6 +74,8 @@ impl Sender {
             // Sleep to simulate sending the SMS.
             sleep(Duration::from_millis(send_time)).await;
             tracing::trace!(sender = self.id, send_time, "simulate send SMS");
+
+            self.metrics.inc_message_sent(send_time).await;
         }
     }
 }

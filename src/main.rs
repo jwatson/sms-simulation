@@ -1,4 +1,6 @@
-use sms_simulation::{producer::spawn_producer, sender::spawn_senders};
+use sms_simulation::{
+    metrics::spawn_metrics, monitor::spawn_monitor, producer::spawn_producer, sender::spawn_senders,
+};
 
 use clap::Parser;
 use color_eyre::Report;
@@ -29,13 +31,13 @@ struct Args {
     #[arg(short, long, require_equals = true, value_name = "PERCENT", default_value_t = DEFAULT_FAILURE_RATE)]
     failure_rate: f64,
 
-    /// Producer/consumer backpressure.
+    /// Producer/sender backpressure.
     #[arg(long, require_equals = true, value_name = "NUM", default_value_t = DEFAULT_MSG_QUEUE_DEPTH)]
     message_queue_depth: usize,
 }
 
 fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error"));
 
     let registry = tracing_subscriber::registry()
         .with(filter)
@@ -49,9 +51,24 @@ fn init_tracing() {
 
 #[tracing::instrument]
 async fn run_simulation(args: &Args) -> Result<(), Report> {
-    let (msg_send, msg_recv) = async_channel::bounded(10);
+    // Spawn a task that senders can communicate with to track SMS simulation
+    // metrics globally.
+    let metrics_handle = spawn_metrics();
+
+    // Spawn a task that periodically prints the current set of metrics.
+    spawn_monitor(&metrics_handle);
+
+    // `async_channel` is mpmc, but unlike Tokio's `broadcast` channel only
+    // one consumer will see any given message.
+    let (msg_send, msg_recv) = async_channel::bounded(args.message_queue_depth);
+
     let producer = spawn_producer(msg_send, args.num_messages);
-    let senders = spawn_senders(msg_recv, args.num_senders, args.send_duration);
+    let senders = spawn_senders(
+        msg_recv,
+        &metrics_handle,
+        args.num_senders,
+        args.send_duration,
+    );
 
     producer.await?;
     senders.join_all().await;
@@ -70,5 +87,6 @@ async fn main() -> Result<(), Report> {
 
     run_simulation(&args).await?;
 
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "service stopping");
     Ok(())
 }

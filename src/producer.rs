@@ -20,7 +20,6 @@ struct Producer {
 }
 
 impl Producer {
-    #[inline]
     #[must_use]
     fn new(channel_tx: Sender<String>, count: usize) -> Self {
         let rng = rand::make_rng();
