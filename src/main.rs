@@ -1,3 +1,5 @@
+use sms_simulation::{producer::spawn_producer, sender::spawn_senders};
+
 use clap::Parser;
 use color_eyre::Report;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -45,14 +47,28 @@ fn init_tracing() {
     registry.init();
 }
 
+#[tracing::instrument]
+async fn run_simulation(args: &Args) -> Result<(), Report> {
+    let (msg_send, msg_recv) = async_channel::bounded(10);
+    let producer = spawn_producer(msg_send, args.num_messages);
+    let senders = spawn_senders(msg_recv, args.num_senders, args.send_duration);
+
+    producer.await?;
+    senders.join_all().await;
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Report> {
     color_eyre::install()?;
 
-    let _args = Args::parse();
+    let args = Args::parse();
 
     init_tracing();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "service starting");
+
+    run_simulation(&args).await?;
 
     Ok(())
 }
