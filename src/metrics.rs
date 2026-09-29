@@ -100,3 +100,27 @@ impl MetricsTracker {
         }
     }
 }
+
+// Unit tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use assert2::check;
+
+    use super::*;
+
+    /// Validates the metrics API.
+    #[tokio::test]
+    async fn validate_api() {
+        let handle = spawn_metrics(1);
+
+        handle.inc_message_sent(100).await;
+        handle.inc_message_sent(100).await;
+        handle.inc_message_failed().await;
+
+        let metrics = handle.get_metrics().await;
+        check!(metrics.sent_msgs == 2);
+        check!(metrics.failed_msgs == 1);
+        check!(metrics.time_per_msg == 100);
+    }
+}

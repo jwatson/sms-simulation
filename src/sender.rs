@@ -91,3 +91,51 @@ impl Sender {
         }
     }
 }
+
+// Unit tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use assert2::check;
+    use tokio::time::timeout;
+
+    use crate::metrics::spawn_metrics;
+
+    use super::*;
+
+    /// Tests that the consumer blocks waiting for data when the queue is empty.
+    #[tokio::test]
+    async fn blocks_when_queue_is_empty() {
+        // Create a queue with 1 slot, and a single sender.
+        let (_tx, rx) = async_channel::bounded(1);
+        let metrics = spawn_metrics(1);
+        let joinset = spawn_senders(rx, &metrics, 1, 0, 0.0);
+
+        // The join should wait forever because the queue is empty.
+        check!(
+            timeout(Duration::from_millis(10), joinset.join_all())
+                .await
+                .is_err()
+        );
+    }
+
+    /// Tests that the consumer terminates when the channel closes.
+    #[tokio::test]
+    async fn completes_when_queue_is_closed() {
+        // Create a queue with 1 slot, and a single sender.
+        let (tx, rx) = async_channel::bounded(1);
+        let metrics = spawn_metrics(1);
+        let joinset = spawn_senders(rx, &metrics, 1, 0, 0.0);
+
+        // Dropping the sender closes the channel, since it's empty and it's
+        // now impossible to add more data to it.
+        drop(tx);
+
+        // Senders will terminate as soon as the channel closes.
+        check!(
+            timeout(Duration::from_millis(10), joinset.join_all())
+                .await
+                .is_ok()
+        );
+    }
+}

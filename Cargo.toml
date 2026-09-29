@@ -20,6 +20,9 @@ tokio-util = "0.7.19"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "parking_lot"] }
 
+[dev-dependencies]
+assert2 = "0.4.1"
+
 [features]
 default = []
 console = ["dep:console-subscriber"]
