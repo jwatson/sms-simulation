@@ -3,13 +3,13 @@ use crate::metrics::MetricsHandle;
 use tokio::{task::JoinHandle, time};
 use tokio_util::sync::CancellationToken;
 
-pub fn spawn_monitor(metrics: &MetricsHandle) -> MonitorHandle {
+pub fn spawn_monitor(metrics: &MetricsHandle, period: u64) -> MonitorHandle {
     let cancel_token = CancellationToken::new();
     let token = cancel_token.clone();
     let handle = metrics.clone();
 
     let join = tokio::spawn(async move {
-        let monitor = Monitor::new(handle, token);
+        let monitor = Monitor::new(handle, token, period);
         monitor.monitor_metrics().await;
     });
 
@@ -30,21 +30,23 @@ impl MonitorHandle {
 struct Monitor {
     handle: MetricsHandle,
     cancel_token: CancellationToken,
+    period: u64,
 }
 
 impl Monitor {
     #[inline]
     #[must_use]
-    fn new(handle: MetricsHandle, cancel_token: CancellationToken) -> Self {
+    fn new(handle: MetricsHandle, cancel_token: CancellationToken, period: u64) -> Self {
         Self {
             handle,
             cancel_token,
+            period,
         }
     }
 
     #[tracing::instrument(skip(self))]
     async fn monitor_metrics(&self) {
-        let mut interval = time::interval(time::Duration::from_secs(2));
+        let mut interval = time::interval(time::Duration::from_secs(self.period));
 
         loop {
             tokio::select! {

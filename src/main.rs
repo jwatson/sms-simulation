@@ -1,58 +1,11 @@
-use sms_simulation::{
-    metrics::spawn_metrics, monitor::spawn_monitor, producer::spawn_producer, sender::spawn_senders,
-};
-
 use clap::Parser;
 use color_eyre::Report;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-use std::ops::RangeInclusive;
-
-const DEFAULT_NUM_SENDERS: usize = 32;
-const DEFAULT_NUM_MESSAGES: usize = 1000;
-const DEFAULT_SEND_DURATION: u64 = 250;
-const DEFAULT_FAILURE_RATE: f64 = 0.05;
-const DEFAULT_MSG_QUEUE_DEPTH: usize = 100;
-
-const FAILURE_RANGE: RangeInclusive<f64> = 0.0..=1.0;
-
-fn failure_rate_in_range(s: &str) -> Result<f64, String> {
-    let rate: f64 = s.parse().map_err(|_| format!("`{s}` isn't a percentage"))?;
-    if FAILURE_RANGE.contains(&rate) {
-        Ok(rate)
-    } else {
-        Err(format!(
-            "percentage not in range {}-{}",
-            FAILURE_RANGE.start(),
-            FAILURE_RANGE.end()
-        ))
-    }
-}
-
-#[derive(Debug, Parser)]
-#[command(version, about, long_about = None, next_line_help = true)]
-struct Args {
-    /// Number of concurrent senders.
-    #[arg(short = 's', long, value_name = "NUM", default_value_t = DEFAULT_NUM_SENDERS)]
-    num_senders: usize,
-
-    /// Number of messages to produce.
-    #[arg(short = 'm', long, value_name = "NUM", default_value_t = DEFAULT_NUM_MESSAGES)]
-    num_messages: usize,
-
-    /// Mean send duration, in milliseconds.
-    #[arg(short = 't', long, value_name = "MS", default_value_t = DEFAULT_SEND_DURATION)]
-    send_duration: u64,
-
-    /// How often a failure occurs.
-    #[arg(short, long, value_name = "PERCENT", default_value_t = DEFAULT_FAILURE_RATE)]
-    #[arg(value_parser=failure_rate_in_range)]
-    failure_rate: f64,
-
-    /// Producer/sender backpressure.
-    #[arg(long, value_name = "NUM", default_value_t = DEFAULT_MSG_QUEUE_DEPTH)]
-    message_queue_depth: usize,
-}
+use sms_simulation::{
+    cli::Args, metrics::spawn_metrics, monitor::spawn_monitor, producer::spawn_producer,
+    sender::spawn_senders,
+};
 
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error"));
@@ -71,10 +24,10 @@ fn init_tracing() {
 async fn run_simulation(args: &Args) -> Result<(), Report> {
     // Spawn a task that senders can communicate with to track SMS simulation
     // metrics globally.
-    let metrics_handle = spawn_metrics();
+    let metrics_handle = spawn_metrics(args.num_senders / 2);
 
     // Spawn a task that periodically prints the current set of metrics.
-    let monitor_handle = spawn_monitor(&metrics_handle);
+    let monitor_handle = spawn_monitor(&metrics_handle, args.monitor_update);
 
     // `async_channel` is mpmc, but unlike Tokio's `broadcast` channel only
     // one consumer will see any given message.

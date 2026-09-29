@@ -1,7 +1,7 @@
 use tokio::sync::{mpsc, oneshot};
 
-pub fn spawn_metrics() -> MetricsHandle {
-    let (tx, rx) = mpsc::channel(32);
+pub fn spawn_metrics(cap: usize) -> MetricsHandle {
+    let (tx, rx) = mpsc::channel(cap);
 
     tokio::spawn(async move {
         let mut tracker = MetricsTracker::new(rx);
