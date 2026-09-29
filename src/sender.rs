@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use async_channel::Receiver;
 use rand::rngs::StdRng;
-use rand_distr::{Distribution, Triangular};
+use rand_distr::{Bernoulli, Distribution, Triangular};
 use tokio::{task::JoinSet, time::sleep};
 
 use crate::metrics::MetricsHandle;
@@ -12,6 +12,7 @@ pub fn spawn_senders(
     metrics: &MetricsHandle,
     count: usize,
     mean: u64,
+    fail: f64,
 ) -> JoinSet<()> {
     let mut set = JoinSet::new();
 
@@ -20,7 +21,7 @@ pub fn spawn_senders(
         let handle = metrics.clone();
 
         set.spawn(async move {
-            let mut sender = Sender::new(id, recv, handle, mean);
+            let mut sender = Sender::new(id, recv, handle, mean, fail);
             sender.send_messages().await;
         });
     }
@@ -34,6 +35,7 @@ struct Sender {
     metrics: MetricsHandle,
     rng: StdRng,
     send_distr: Triangular<f64>,
+    fail_distr: Bernoulli,
 }
 
 impl Sender {
@@ -43,6 +45,7 @@ impl Sender {
         channel_rx: Receiver<String>,
         metrics: MetricsHandle,
         mean_send_time: u64,
+        failure_rate: f64,
     ) -> Self {
         let rng = rand::make_rng();
 
@@ -52,12 +55,17 @@ impl Sender {
         // This unwrap won't panic because this is a valid interval.
         let send_distr = Triangular::new(min, max, mode).unwrap();
 
+        // This unwrap won't panic because we've already ensured that the
+        // failure rate is in the range [0, 1].
+        let fail_distr = Bernoulli::new(failure_rate).unwrap();
+
         Self {
             id,
             channel_rx,
             metrics,
             rng,
             send_distr,
+            fail_distr,
         }
     }
 
@@ -75,7 +83,11 @@ impl Sender {
             sleep(Duration::from_millis(send_time)).await;
             tracing::trace!(sender = self.id, send_time, "simulate send SMS");
 
-            self.metrics.inc_message_sent(send_time).await;
+            if self.fail_distr.sample(&mut self.rng) {
+                self.metrics.inc_message_failed().await;
+            } else {
+                self.metrics.inc_message_sent(send_time).await;
+            }
         }
     }
 }

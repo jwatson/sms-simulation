@@ -1,40 +1,72 @@
 use crate::metrics::MetricsHandle;
 
-use tokio::time;
+use tokio::{task::JoinHandle, time};
+use tokio_util::sync::CancellationToken;
 
-pub fn spawn_monitor(metrics: &MetricsHandle) {
+pub fn spawn_monitor(metrics: &MetricsHandle) -> MonitorHandle {
+    let cancel_token = CancellationToken::new();
+    let token = cancel_token.clone();
     let handle = metrics.clone();
 
-    tokio::spawn(async move {
-        let monitor = Monitor::new(handle);
+    let join = tokio::spawn(async move {
+        let monitor = Monitor::new(handle, token);
         monitor.monitor_metrics().await;
     });
+
+    MonitorHandle { join, cancel_token }
+}
+
+pub struct MonitorHandle {
+    pub join: JoinHandle<()>,
+    cancel_token: CancellationToken,
+}
+
+impl MonitorHandle {
+    pub fn stop(&self) {
+        self.cancel_token.cancel();
+    }
 }
 
 struct Monitor {
     handle: MetricsHandle,
+    cancel_token: CancellationToken,
 }
 
 impl Monitor {
     #[inline]
     #[must_use]
-    fn new(handle: MetricsHandle) -> Self {
-        Self { handle }
+    fn new(handle: MetricsHandle, cancel_token: CancellationToken) -> Self {
+        Self {
+            handle,
+            cancel_token,
+        }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn monitor_metrics(&self) {
         let mut interval = time::interval(time::Duration::from_secs(2));
 
         loop {
-            interval.tick().await;
-
-            let metrics = self.handle.get_metrics().await;
-
-            println!("PROGRESS MONITOR");
-            println!("──────────────────────────");
-            println!("• messages sent:    {}", metrics.sent_msgs);
-            println!("• messages failed:  {}", metrics.failed_msgs);
-            println!("• time per message: {}ms\n", metrics.time_per_msg);
+            tokio::select! {
+                biased;
+                _ = self.cancel_token.cancelled() => {
+                    self.print_metrics().await;
+                    return
+                }
+                _ = interval.tick() => {
+                    self.print_metrics().await
+                }
+            }
         }
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn print_metrics(&self) {
+        let metrics = self.handle.get_metrics().await;
+        println!("PROGRESS MONITOR");
+        println!("──────────────────────────");
+        println!("• messages sent:    {}", metrics.sent_msgs);
+        println!("• messages failed:  {}", metrics.failed_msgs);
+        println!("• time per message: {}ms\n", metrics.time_per_msg);
     }
 }
