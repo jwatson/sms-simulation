@@ -1,27 +1,35 @@
+//! Generates random SMS messages.
+
 use async_channel::Sender;
 use rand::{distr::SampleString, rngs::StdRng};
 use rand_distr::{Alphanumeric, Distribution, Uniform};
 use tokio::task::JoinHandle;
 
+/// The maximum length of an SMS message.
 const MAX_MSG_LEN: usize = 100;
 
+/// Spawns a new producer task, returning a [`JoinHandle`] for it.
+///
+/// The producer will generate random SMS messages and send them over
+/// `channel_tx`, terminating once `count` messages have been sent.
 pub fn spawn_producer(channel_tx: Sender<String>, count: usize) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut producer = Producer::new(channel_tx, count);
-        producer.produce_sms_messages().await;
+        let mut producer = Producer::new(channel_tx);
+        producer.produce_sms_messages(count).await;
     })
 }
 
+/// The producer keeps a strong reference to the `async_channel`'s `Sender`,
+/// and to state surrounding the creation of random SMS messages.
 struct Producer {
     channel_tx: Sender<String>,
-    count: usize,
     rng: StdRng,
     length_distr: Uniform<usize>,
 }
 
 impl Producer {
     #[must_use]
-    fn new(channel_tx: Sender<String>, count: usize) -> Self {
+    fn new(channel_tx: Sender<String>) -> Self {
         let rng = rand::make_rng();
 
         // This unwrap won't panic because this is a valid interval.
@@ -29,15 +37,15 @@ impl Producer {
 
         Self {
             channel_tx,
-            count,
             rng,
             length_distr,
         }
     }
 
+    /// Generates `count` random strings and sends them over the `async_channel`.
     #[tracing::instrument(skip(self))]
-    async fn produce_sms_messages(&mut self) {
-        for message_id in 0..self.count {
+    async fn produce_sms_messages(&mut self, count: usize) {
+        for message_id in 0..count {
             // Get a random length from the closed range [1, MAX_MSG_LEN].
             let len = self.length_distr.sample(&mut self.rng);
 

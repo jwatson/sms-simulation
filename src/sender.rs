@@ -1,3 +1,5 @@
+//! Simulates sending SMS messages.
+
 use std::time::Duration;
 
 use async_channel::Receiver;
@@ -7,6 +9,11 @@ use tokio::{task::JoinSet, time::sleep};
 
 use crate::metrics::MetricsHandle;
 
+/// Spawns `count` sender tasks, returning a [`JoinSet`] of the senders.
+///
+/// The `channel_rx` and `metrics` handles are cloned for each task spawned.
+/// `mean` represents the average time spent “sending” the SMS, and `fail` is
+/// the error rate.
 pub fn spawn_senders(
     channel_rx: Receiver<String>,
     metrics: &MetricsHandle,
@@ -49,6 +56,7 @@ impl Sender {
     ) -> Self {
         let rng = rand::make_rng();
 
+        // Sample from a Triangular distribution where mode == mean.
         let min = (mean_send_time / 2) as f64;
         let max = (mean_send_time * 2) as f64;
         let mode = mean_send_time as f64;
@@ -69,6 +77,7 @@ impl Sender {
         }
     }
 
+    /// Consumes messages from the channel and simulates sending them.
     #[tracing::instrument(skip(self))]
     async fn send_messages(&mut self) {
         // Run until the channel is closed. This will happen once the producer

@@ -1,5 +1,13 @@
+//! Tracks system-wide delivery metrics.
+
 use tokio::sync::{mpsc, oneshot};
 
+/// Spawns a task that manages shared access to system-wide metrics.
+///
+/// The `cap`acity parameter controls the depth of the bounded MPSC channel
+/// used to communicate between tasks.
+///
+/// The returned [`MetricsHandle`] can be used to update/retrieve metrics.
 pub fn spawn_metrics(cap: usize) -> MetricsHandle {
     let (tx, rx) = mpsc::channel(cap);
 
@@ -11,19 +19,28 @@ pub fn spawn_metrics(cap: usize) -> MetricsHandle {
     MetricsHandle { msg_tx: tx }
 }
 
+/// The set of metrics being tracked.
 #[derive(Clone, Copy)]
 pub struct Metrics {
+    /// The number of messages successfully sent.
     pub sent_msgs: u64,
+    /// The number of messages that failed to send.
     pub failed_msgs: u64,
+    /// The average time spent sending a message.
     pub time_per_msg: u64,
 }
 
+/// A handle used to communicate with the metrics task.
 #[derive(Clone)]
 pub struct MetricsHandle {
     msg_tx: mpsc::Sender<MetricsMessage>,
 }
 
 impl MetricsHandle {
+    /// Increments the `sent_msgs` metric.
+    ///
+    /// The `time` parameter is the time it took to send the message. This is
+    /// used to calculate the average time per message.
     #[tracing::instrument(skip(self))]
     pub async fn inc_message_sent(&self, time: u64) {
         let res = self.msg_tx.send(MetricsMessage::IncSent { time }).await;
@@ -32,6 +49,7 @@ impl MetricsHandle {
         }
     }
 
+    /// Increments the `failed_msgs` metric.
     #[tracing::instrument(skip(self))]
     pub async fn inc_message_failed(&self) {
         let res = self.msg_tx.send(MetricsMessage::IncFailed).await;
@@ -40,6 +58,7 @@ impl MetricsHandle {
         }
     }
 
+    /// Returns the latest `Metrics`.
     #[tracing::instrument(skip(self))]
     pub async fn get_metrics(&self) -> Metrics {
         let (tx, rx) = oneshot::channel();
@@ -50,16 +69,19 @@ impl MetricsHandle {
     }
 }
 
+/// Messages passed between client tasks and the worker.
 enum MetricsMessage {
-    IncSent {
-        time: u64,
-    },
+    /// Increment the sent metric, and add `time` to the rolling sum.
+    IncSent { time: u64 },
+    /// Increment the failed metric.
     IncFailed,
+    /// Return the latest metrics on the `respond_to` oneshot channel.
     GetMetrics {
         respond_to: oneshot::Sender<Metrics>,
     },
 }
 
+/// State managed by the tracker task.
 struct MetricsTracker {
     msg_rx: mpsc::Receiver<MetricsMessage>,
     total_time: u64,
@@ -81,6 +103,7 @@ impl MetricsTracker {
         }
     }
 
+    /// Handles request/response to client tasks.
     #[tracing::instrument(skip(self))]
     async fn collect_metrics(&mut self) {
         while let Some(msg) = self.msg_rx.recv().await {
