@@ -45,6 +45,9 @@ async fn run_simulation(args: &Args) -> Result<(), Report> {
     producer.await?;
     senders.join_all().await;
 
+    // The `stop()` method tells the monitor to print the metrics one last time
+    // before terminating. We await the monitor's join handle to ensure that it
+    // has time to run.
     monitor_handle.stop();
     monitor_handle.join.await?;
 

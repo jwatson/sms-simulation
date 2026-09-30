@@ -97,7 +97,7 @@ Senders will run until the channel is closed; this occurs when the both the
 
 The metrics tracker is an actor that manages access to the metrics data using
 `mpsc` and `oneshot` channels in a request/response synchronization pattern.
-Spawing the metrics task returns a `MetricsHandle` that contains the `mpsc`
+Spawning the metrics task returns a `MetricsHandle` that contains the `mpsc`
 channel's `Sender`. A `clone()` of this handle is passed to each sender task,
 which uses it to record send/fail data and delivery duration for each message.
 
